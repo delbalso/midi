@@ -7,6 +7,7 @@ import glob
 midi_dir = project_setup.PROJECT_HOME + '/data/midi'
 trans_dir = project_setup.PROJECT_HOME + '/data/transcriptions'
 notes_dir = project_setup.PROJECT_HOME + '/data/notes'
+tracks_dir = project_setup.PROJECT_HOME + '/data/tracks'
 tracks = {}
 
 class Note:
@@ -17,6 +18,17 @@ class Note:
     
     def __repr__(self):
         return "NOTE, note: " + str(self.note) + ", time: " + str(self.time) + ", length: " + str(self.length) + "\n"
+
+def writeDebugTrack(track, filename, index):
+    if not os.path.exists(tracks_dir):
+        os.makedirs(tracks_dir)
+    pattern = midi.Pattern()
+    pattern.append(track)
+    eot = midi.EndOfTrackEvent(tick=1)
+    track.append(eot)
+    print "Writing debug track for "+filename+". Track #"+str(index)
+    print pattern
+    midi.write_midifile(tracks_dir + "/" + filename + "_track"+str(index), pattern) 
 
 def notesToMidi(notes):
     print "printing MIDI"
@@ -38,8 +50,8 @@ def notesToMidi(notes):
     print pattern
     # Save the pattern to disk
     midi.write_midifile("example.mid", pattern) 
-
-def extract_tracks():
+    
+def extract_tracks(GivenTrack=None):
     #/ Create directory if it doesn't exist
     if not os.path.exists(trans_dir):
         os.makedirs(trans_dir)
@@ -52,16 +64,17 @@ def extract_tracks():
         os.remove(f)
 
     # Get list of midi files and transcribe them
-    midi_files = glob.glob(midi_dir + "/*.mid")
-    print midi_files
+    if (GivenTrack == None):
+        midi_files = glob.glob(midi_dir + "/*.mid")
+    else: 
+        midi_files = [midi_dir + "/" + GivenTrack + ".mid"]
+    print "Files to extract: " + str(midi_files)
+
     for filepath in midi_files:
         filename = os.path.splitext(os.path.basename(filepath))[0]
         pattern =  midi.read_midifile(filepath)
 
-        print filename
-        if (filename != "sm3warp"):
-            pass
-            #continue
+        print "Extracting: " + filename
 
         # Write pattern to file
         fo = open(trans_dir + '/' + filename + '.txt', "w")
@@ -69,11 +82,14 @@ def extract_tracks():
         fo.close()
         
         for index, track in enumerate(pattern):
+            print "Processing track #" + str(index)
             notes = []
             seenNotes = {}
             trackname = None
 
-            for event in sorted(track, key=lambda x: x.tick, reverse=False):
+            writeDebugTrack(track, filename, index)
+
+            for event in track:
                 print "event time: " + str(event.tick)
 
                 # Get track name if it exists
@@ -125,6 +141,9 @@ def extract_transitions(tracks):
     restTransitions = {}
     # Process transition events from tracks
     for track in tracks.values():
+        print track
+        return
+        print "NOOOOOO"
         for index, note1 in enumerate(sorted(track)):
         #for index, note1 in enumerate(sorted(track, key=operator.attrgetter('time'), reverse=False)):
             # Find note2
@@ -143,18 +162,21 @@ def extract_transitions(tracks):
                     transitionTally(restTransitions, note1.note, note2.time - note1.time) # Note: this transition is using the note as the key
                     print "done transitions"
 
+        return
+
+
         print transitionTally
             
 def main():
-    """
     print "Extracting tracks..."
-    tracks = extract_tracks()
+    tracks = extract_tracks("sm3warp")
+    """
     print tracks
     print "Extracting transitions..."
     transitions = extract_transitions(tracks)
     print "DONE"
-    """
     notesToMidi(None)
+    """
 
 
 

@@ -3,5 +3,6 @@
 *.DS_Store
 data/notes/
 data/transcriptions/
+data/tracks/
 example.mid
 *un~
