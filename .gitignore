@@ -1,0 +1,7 @@
+*~un
+*.swp
+*.DS_Store
+data/notes/
+data/transcriptions/
+example.mid
+*un~
