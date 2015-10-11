@@ -3,21 +3,78 @@ import operator
 import midi
 import os
 import glob
+from modeling import MarkovChain
 
 midi_dir = project_setup.PROJECT_HOME + '/data/midi'
 trans_dir = project_setup.PROJECT_HOME + '/data/transcriptions'
 notes_dir = project_setup.PROJECT_HOME + '/data/notes'
 tracks_dir = project_setup.PROJECT_HOME + '/data/tracks'
+output_midi_dir = project_setup.PROJECT_HOME + '/data/output_midi'
 tracks = {}
 
-class Note:
+class Note(object):
     def __init__(self, note, time, length):
         self.note = note
         self.time = time
         self.length = length
-    
+
+    def __eq__(self, otherNote):
+           return self.note == otherNote.note and self.time == otherNote.time and self.length == otherNote.length
+
+    def __hash__(self):
+        return hash((self.note, self.time, self.length))
+
     def __repr__(self):
-        return "NOTE, note: " + str(self.note) + ", time: " + str(self.time) + ", length: " + str(self.length) + "\n"
+
+        return str((self.note, self.time, self.length))
+
+def trackToNotelist(track):
+    notes = []
+    seenNotes = {}
+    trackname = None
+
+    for event in track:
+        # ensure we're dealing with a note change event
+        if ((not isinstance(event, midi.NoteOnEvent)) and (not isinstance(event, midi.NoteOffEvent))):
+            continue
+        #print str(event)
+        notePitch = event.data[0]
+        noteTime = event.tick
+        #print "noteTime: "+str(noteTime)
+        if isinstance(event, midi.NoteOnEvent):
+            seenNotes[notePitch] = event
+        elif isinstance(event, midi.NoteOffEvent):
+            if (notePitch not in seenNotes or seenNotes[notePitch] is None):
+                print "Error, found Off event with no corresponding On event."
+                continue
+            #print "Adding note: " + str(event)
+            notes.append(Note(notePitch, seenNotes[notePitch].tick, noteTime))
+            #print notes
+            seenNotes[notePitch] = None
+    return notes
+
+def noteListToPattern(noteList):
+    pattern = midi.Pattern(resolution=480)
+    track = midi.Track()
+    pattern.append(track)
+    for note in noteList:
+        on = midi.NoteOnEvent(tick=note.time, velocity=100, pitch=note.note)
+        track.append(on)
+        off = midi.NoteOffEvent(tick=note.length, pitch=note.note)
+        track.append(off)
+    track.append(midi.EndOfTrackEvent(tick=1))
+    return pattern
+
+# Write a NoteList to file
+def writeNoteListToFile (notes, filename):
+    fo = open(notes_dir + '/' + filename + '.txt', "w")
+    fo.write(str(notes))
+    fo.close()
+
+def writeOutputPattern(pattern, filename):
+    if not os.path.exists(output_midi_dir):
+        os.makedirs(output_midi_dir)
+    midi.write_midifile(output_midi_dir + "/" + filename + ".mid", pattern) 
 
 def writeDebugTrack(track, filename, index):
     if not os.path.exists(tracks_dir):
@@ -26,33 +83,26 @@ def writeDebugTrack(track, filename, index):
     pattern.append(track)
     eot = midi.EndOfTrackEvent(tick=1)
     track.append(eot)
-    print "Writing debug track for "+filename+". Track #"+str(index)
-    print pattern
+    #print "Writing debug track for "+filename+". Track #"+str(index)
+    #print pattern
     midi.write_midifile(tracks_dir + "/" + filename + "_track"+str(index), pattern) 
 
-def notesToMidi(notes):
+def createExampleMidi(notes):
     print "printing MIDI"
     pattern = midi.Pattern()
-    # Instantiate a MIDI Track (contains a list of MIDI events)
     track = midi.Track()
-    # Append the track to the pattern
     pattern.append(track)
-    # Instantiate a MIDI note on event, append it to the track
     on = midi.NoteOnEvent(tick=0, velocity=100, pitch=midi.G_3)
     track.append(on)
-    # Instantiate a MIDI note off event, append it to the track
     off = midi.NoteOffEvent(tick=100000, pitch=midi.G_3)
     track.append(off)
-    # Add the end of track event, append it to the track
     eot = midi.EndOfTrackEvent(tick=1)
     track.append(eot)
-    # Print out the pattern
     print pattern
-    # Save the pattern to disk
     midi.write_midifile("example.mid", pattern) 
-    
-def extract_tracks(GivenTrack=None):
-    #/ Create directory if it doesn't exist
+
+def getFileListToExtract(GivenTrack=None):
+    # Create directory if it doesn't exist
     if not os.path.exists(trans_dir):
         os.makedirs(trans_dir)
     if not os.path.exists(notes_dir):
@@ -69,12 +119,15 @@ def extract_tracks(GivenTrack=None):
     else: 
         midi_files = [midi_dir + "/" + GivenTrack + ".mid"]
     print "Files to extract: " + str(midi_files)
+    return midi_files
 
+def extractNoteListsFromFile(GivenTrack=None):
+    midi_files = getFileListToExtract(GivenTrack)
+    noteLists = []
     for filepath in midi_files:
         filename = os.path.splitext(os.path.basename(filepath))[0]
-        pattern =  midi.read_midifile(filepath)
-
         print "Extracting: " + filename
+        pattern =  midi.read_midifile(filepath)
 
         # Write pattern to file
         fo = open(trans_dir + '/' + filename + '.txt', "w")
@@ -83,102 +136,26 @@ def extract_tracks(GivenTrack=None):
         
         for index, track in enumerate(pattern):
             print "Processing track #" + str(index)
-            notes = []
-            seenNotes = {}
-            trackname = None
-
             writeDebugTrack(track, filename, index)
-
-            for event in track:
-                print "event time: " + str(event.tick)
-
-                # Get track name if it exists
-                if isinstance(event, midi.TrackNameEvent):
-                    trackname = event.text
-                    
-                # ensure we're dealing with a note change event
-                if ((not isinstance(event, midi.NoteOnEvent)) and (not isinstance(event, midi.NoteOffEvent))):
-                    continue
-                
-                notePitch = event.data[0]
-                noteTime = event.tick
-                if isinstance(event, midi.NoteOnEvent):
-                    print "adding note: " + str(event)
-                    seenNotes[notePitch] = event
-                elif isinstance(event, midi.NoteOffEvent):
-                    if (notePitch not in seenNotes or seenNotes[notePitch] is None):
-                        print "Error, found Off event with no corresponding On event."
-                        continue
-                    print "adding note for good: " + str(event)
-                    notes.append(Note(notePitch, seenNotes[notePitch].tick, noteTime - seenNotes[notePitch].tick))
-
+            noteList = trackToNotelist(track)
             # Save this track's notes if it has notes
-            if len(notes)>1:
-
-                if trackname is not None:
-                    notesFilename = filename + "_" + str(index) + "_" + trackname
-                else:
-                    notesFilename = filename + "_" + str(index)
-                tracks[notesFilename] = notes
-                    
-                # Write track's notes to file
-                fo = open(notes_dir + '/' + notesFilename + '.txt', "w")
-                fo.write(str(notes))
-                fo.close()
-
-    return tracks
-
-def transitionTally (transitionDict, state1, state2):
-    if state1 not in transitionDict:
-        transitionDict[state1] = {}
-    if state2 not in transitionDict[state1]:
-        transitionDict[state1][state2] = 0
-    transitionDict[state1][state2] = transitionDict[state1][state2] + 1
-
-def extract_transitions(tracks):
-    noteTransitions = {}
-    lengthTransitions = {}
-    restTransitions = {}
-    # Process transition events from tracks
-    for track in tracks.values():
-        print track
-        return
-        print "NOOOOOO"
-        for index, note1 in enumerate(sorted(track)):
-        #for index, note1 in enumerate(sorted(track, key=operator.attrgetter('time'), reverse=False)):
-            # Find note2
-            note2Found = False
-            for candidateNote2 in sorted(track)[index:]:
-                print "looking for note2"
-            #for candidateNote2 in sorted(track, key=lambda x: x.time, reverse=False)[index:]:
-                if (candidateNote2.time > note1.time and note2Found is False):
-                    note2Found = True
-                    note2 = candidateNote2
-                    print ("note 1 time: " + str(note1.time) + ", note 2 time: " + str(note2.time))
-
-                    # record note transition
-                    transitionTally(noteTransitions, note1.note, note2.note)
-                    transitionTally(lengthTransitions, note1.length, note2.length)
-                    transitionTally(restTransitions, note1.note, note2.time - note1.time) # Note: this transition is using the note as the key
-                    print "done transitions"
-
-        return
-
-
-        print transitionTally
+            if len(noteList) > 1:
+                writeNoteListToFile(noteList, filename+"_"+ str(index))
+            noteLists.append(noteList)
+    return noteLists
             
 def main():
     print "Extracting tracks..."
-    tracks = extract_tracks("sm3warp")
+    notelists = extractNoteListsFromFile("sm3warp")
+    model = MarkovChain()
+    model.trainFromNotelists(notelists, 1)
+    sequence = model.generateSequence()
+    pattern = noteListToPattern(sequence)
+    writeOutputPattern(pattern, "test")
+    print str(sequence)
     """
-    print tracks
-    print "Extracting transitions..."
-    transitions = extract_transitions(tracks)
-    print "DONE"
-    notesToMidi(None)
+    createExampleMidi(None)
     """
-
-
 
 if __name__ == "__main__":
     main()
